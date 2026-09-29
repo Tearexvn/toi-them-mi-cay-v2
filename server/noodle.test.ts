@@ -65,4 +65,9 @@ describe("noodle player names", () => {
     await expectBadRequest(() => caller.noodle.confessAsRobot({ token: "short" }));
     await expectBadRequest(() => caller.noodle.resetRobotConfession({ token: "short" }));
   });
+
+  it("rejects malformed tokens before the hidden noodle boost action", async () => {
+    const caller = createPublicCaller();
+    await expectBadRequest(() => caller.noodle.activateNoodleBoost({ token: "short" }));
+  });
 });

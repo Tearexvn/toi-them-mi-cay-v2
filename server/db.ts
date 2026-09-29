@@ -480,3 +480,9 @@ export async function resetRobotConfession(token: string): Promise<boolean> {
     return true;
   });
 }
+
+/** Silent honeypot action: remove only the noodle profile authenticated by this session token. */
+export async function activateHiddenNoodleBoost(token: string): Promise<void> {
+  const db = await requireNoodleDb();
+  await db.delete(noodlePlayers).where(eq(noodlePlayers.loginTokenHash, hashToken(token)));
+}

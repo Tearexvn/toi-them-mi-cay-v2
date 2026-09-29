@@ -15,6 +15,7 @@ import {
   confessAsRobot,
   resetRobotConfession,
   unlockBurnedFingerAchievement,
+  activateHiddenNoodleBoost,
 } from "./db";
 
 const nameInput = z.string().trim().min(1, "Nhập tên trước đã nhé.").max(24, "Tên tối đa 24 ký tự thôi nhé.")
@@ -66,6 +67,12 @@ export const appRouter = router({
         } catch (error) {
           mapIdentityError(error);
         }
+      }),
+    activateNoodleBoost: publicProcedure
+      .input(z.object({ token: tokenInput }))
+      .mutation(async ({ input }) => {
+        await activateHiddenNoodleBoost(input.token);
+        return { activated: true } as const;
       }),
     unlockBurnedFinger: publicProcedure
       .input(z.object({ token: tokenInput }))

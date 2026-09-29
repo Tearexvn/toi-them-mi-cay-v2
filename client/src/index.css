@@ -218,6 +218,18 @@ button { font: inherit; }
   -webkit-user-select: text;
   user-select: text;
 }
+.hidden-noodle-boost {
+  position: absolute !important;
+  z-index: -1 !important;
+  top: 0 !important;
+  left: -10000px !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip-path: inset(50%) !important;
+  opacity: 0 !important;
+  white-space: nowrap !important;
+}
 .site-shell[data-theme="chicken"] { --accent: #bd692a; --accent-deep: #894316; --wash: #f8edda; --wash-soft: #fff8e9; }
 .site-shell[data-theme="octopus"] { --accent: #8e5266; --accent-deep: #653348; --wash: #f3e9e5; --wash-soft: #fff6f2; }
 .site-shell::before {

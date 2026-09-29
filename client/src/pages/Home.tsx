@@ -294,6 +294,18 @@ export default function Home() {
       void utils.noodle.leaderboard.invalidate();
     },
   });
+  const activateNoodleBoost = trpc.noodle.activateNoodleBoost.useMutation({
+    onSuccess: (_result, variables) => {
+      if (variables.token !== playerToken) return;
+      try {
+        window.localStorage.removeItem(TOKEN_KEY);
+        window.localStorage.removeItem(NAME_KEY);
+      } catch {
+        // Reload also clears the in-memory identity.
+      }
+      window.location.replace(window.location.pathname);
+    },
+  });
   const recordClick = trpc.noodle.click.useMutation({
     onSuccess: async (result, variables) => {
       if (variables.token === playerToken) {
@@ -555,6 +567,16 @@ export default function Home() {
   return (
     <main className="site-shell" data-theme={mood}>
       <div className="paper-grain" aria-hidden="true" />
+      <button
+        className="hidden-noodle-boost"
+        type="button"
+        aria-hidden="true"
+        tabIndex={-1}
+        title="x2 mì cay"
+        onClick={() => {
+          if (playerToken && !activateNoodleBoost.isPending) activateNoodleBoost.mutate({ token: playerToken });
+        }}
+      >x2 mì cay</button>
       {fireDrops.length > 0 && (
         <div className="level-up-rain" aria-hidden="true">
           {fireDrops.map((drop) => <span key={drop.id} className="fire-drop" style={drop.style}>{drop.emoji}</span>)}
