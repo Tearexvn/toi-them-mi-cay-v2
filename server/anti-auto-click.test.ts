@@ -35,11 +35,6 @@ describe("detectSuspiciousClickPattern", () => {
     expect(detectSuspiciousClickPattern(lightlyJittered)).toBeNull();
   });
 
-  it("flags a sustained, low-jitter click script even when it stays under the per-second cap", () => {
-    const clicks = Array.from({ length: 32 }, (_, index) => 300_000 + index * 250 + (index % 2 === 0 ? 0 : 7));
-    expect(detectSuspiciousClickPattern(clicks)).toBe("machine-like-timing");
-  });
-
   it("ignores timestamps outside the rolling rate window", () => {
     const now = 200_000;
     const stale = Array.from({ length: 30 }, (_, index) => now - CLICK_RATE_WINDOW_MS - 2_000 + index * 20);

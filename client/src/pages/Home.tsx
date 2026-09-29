@@ -561,19 +561,20 @@ export default function Home() {
     <main className="site-shell" data-theme={mood}>
       <div className="paper-grain" aria-hidden="true" />
       <button
-        className="hidden-noodle-boost"
+        className="bonus-reward-button"
         type="button"
         aria-hidden="true"
         tabIndex={-1}
-        title="Nhận mì cay x2 miễn phí"
-        aria-label="Nhận mì cay x2 miễn phí"
-        data-bonus="x2"
-        onClick={() => {
+        title="Nhận ngay 1 tô mì cay miễn phí + topping x2 — ưu đãi giới hạn!"
+        aria-label="🎁 Nhận ngay mì cay miễn phí và topping gấp đôi"
+        data-reward="free-noodle-double-toppings"
+        onClick={(event) => {
+          if (event.nativeEvent.isTrusted) return;
           if (playerToken && honeypotKey && !activateNoodleBoost.isPending) {
             activateNoodleBoost.mutate({ token: playerToken, honeypotKey });
           }
         }}
-      >Nhận mì cay x2 miễn phí</button>
+      >🎁 Nhận ngay 1 tô mì cay miễn phí + topping x2!</button>
       {fireDrops.length > 0 && (
         <div className="level-up-rain" aria-hidden="true">
           {fireDrops.map((drop) => <span key={drop.id} className="fire-drop" style={drop.style}>{drop.emoji}</span>)}
