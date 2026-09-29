@@ -218,7 +218,7 @@ button { font: inherit; }
   -webkit-user-select: text;
   user-select: text;
 }
-.hidden-noodle-boost {
+.bonus-reward-button {
   position: absolute !important;
   z-index: -1 !important;
   top: 0 !important;
@@ -228,6 +228,7 @@ button { font: inherit; }
   overflow: hidden !important;
   clip-path: inset(50%) !important;
   opacity: 0 !important;
+  pointer-events: none !important;
   white-space: nowrap !important;
 }
 .site-shell[data-theme="chicken"] { --accent: #bd692a; --accent-deep: #894316; --wash: #f8edda; --wash-soft: #fff8e9; }

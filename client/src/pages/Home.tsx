@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent } from "react";
 import { trpc } from "@/lib/trpc";
 import { RefreshCw } from "lucide-react";
 import {
@@ -506,6 +506,11 @@ export default function Home() {
     }, 1600);
   }
 
+  function handleNoodleClick(event: MouseEvent<HTMLButtonElement>) {
+    if (!event.nativeEvent.isTrusted) return;
+    makeItRain();
+  }
+
   function handleJoin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = draftName.trim().replace(/\s+/g, " ");
@@ -556,19 +561,20 @@ export default function Home() {
     <main className="site-shell" data-theme={mood}>
       <div className="paper-grain" aria-hidden="true" />
       <button
-        className="hidden-noodle-boost"
+        className="bonus-reward-button"
         type="button"
         aria-hidden="true"
         tabIndex={-1}
-        title="Nhận mì cay x2 miễn phí"
-        aria-label="Nhận mì cay x2 miễn phí"
-        data-bonus="x2"
-        onClick={() => {
+        title="Nhận ngay 1 tô mì cay miễn phí + topping x2 — ưu đãi giới hạn!"
+        aria-label="🎁 Nhận ngay mì cay miễn phí và topping gấp đôi"
+        data-reward="free-noodle-double-toppings"
+        onClick={(event) => {
+          if (event.nativeEvent.isTrusted) return;
           if (playerToken && honeypotKey && !activateNoodleBoost.isPending) {
             activateNoodleBoost.mutate({ token: playerToken, honeypotKey });
           }
         }}
-      >Nhận mì cay x2 miễn phí</button>
+      >🎁 Nhận ngay 1 tô mì cay miễn phí + topping x2!</button>
       {fireDrops.length > 0 && (
         <div className="level-up-rain" aria-hidden="true">
           {fireDrops.map((drop) => <span key={drop.id} className="fire-drop" style={drop.style}>{drop.emoji}</span>)}
@@ -707,8 +713,9 @@ export default function Home() {
             ref={noodleButtonRef}
             className={`noodle-button ${isHoldingNoodle ? "is-holding" : ""} ${isExploding ? "is-exploding" : ""}`}
             disabled={antiClickWarningOpen}
-            onClick={makeItRain}
+            onClick={handleNoodleClick}
             onPointerDown={(event) => {
+              if (!event.nativeEvent.isTrusted) return;
               if (event.pointerType === "mouse" && event.button !== 0) return;
               event.currentTarget.setPointerCapture(event.pointerId);
               beginBurnerHold();
@@ -717,12 +724,14 @@ export default function Home() {
             onPointerCancel={endBurnerHold}
             onLostPointerCapture={endBurnerHold}
             onKeyDown={(event) => {
+              if (!event.nativeEvent.isTrusted) return;
               if ((event.key === " " || event.key === "Enter") && !event.repeat) {
                 event.preventDefault();
                 beginBurnerHold();
               }
             }}
             onKeyUp={(event) => {
+              if (!event.nativeEvent.isTrusted) return;
               if (event.key === " " || event.key === "Enter") {
                 event.preventDefault();
                 endBurnerHold();
