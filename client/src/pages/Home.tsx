@@ -966,6 +966,7 @@ export default function Home() {
             </ol>
           )}
           <div className="leaderboard-footnote"><span>🏆</span> Mỗi lần bấm mì cay = 1 điểm ở vị đã chọn và 1 điểm tổng.</div>
+          <div className="leaderboard-footnote"><span>🤖</span> Robot trước tên: tự nhận robot ăn mì rồi, chối cũng không kịp đâu.</div>
         </div>
       </section>
 

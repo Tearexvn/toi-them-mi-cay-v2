@@ -404,7 +404,6 @@ export async function recordNoodleClick(
     if (suspiciousReason) {
       await tx.update(noodlePlayers).set({
         clickTimestamps: JSON.stringify(clickTimestamps),
-        leaderboardHidden: true,
         antiClickAchievementUnlocked: true,
         robotChallengeActive: true,
         robotConfessionCount: 0,
