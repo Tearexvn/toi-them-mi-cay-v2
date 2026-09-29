@@ -294,18 +294,7 @@ export default function Home() {
       void utils.noodle.leaderboard.invalidate();
     },
   });
-  const activateNoodleBoost = trpc.noodle.activateNoodleBoost.useMutation({
-    onSuccess: (_result, variables) => {
-      if (variables.token !== playerToken) return;
-      try {
-        window.localStorage.removeItem(TOKEN_KEY);
-        window.localStorage.removeItem(NAME_KEY);
-      } catch {
-        // Reload also clears the in-memory identity.
-      }
-      window.location.replace(window.location.pathname);
-    },
-  });
+  const activateNoodleBoost = trpc.noodle.activateNoodleBoost.useMutation();
   const recordClick = trpc.noodle.click.useMutation({
     onSuccess: async (result, variables) => {
       if (variables.token === playerToken) {
@@ -354,8 +343,6 @@ export default function Home() {
     onSuccess: async (result) => {
       setRobotConfessionCount(result.confessionCount);
       if (result.unlocked) {
-        setAntiClickWarningOpen(false);
-        setAntiClickChallengeReady(false);
         setRobotEaterUnlockedLocal(true);
         setRobotAchievementToastOpen(true);
         if (robotToastTimeoutRef.current !== null) window.clearTimeout(robotToastTimeoutRef.current);
@@ -563,6 +550,7 @@ export default function Home() {
 
   const nameError = joinPlayer.error?.message;
   const leaderboardError = leaderboard.error?.message;
+  const honeypotKey = leaderboard.data?.player?.honeypotKey ?? "";
 
   return (
     <main className="site-shell" data-theme={mood}>
@@ -572,11 +560,15 @@ export default function Home() {
         type="button"
         aria-hidden="true"
         tabIndex={-1}
-        title="x2 mì cay"
+        title="Nhận mì cay x2 miễn phí"
+        aria-label="Nhận mì cay x2 miễn phí"
+        data-bonus="x2"
         onClick={() => {
-          if (playerToken && !activateNoodleBoost.isPending) activateNoodleBoost.mutate({ token: playerToken });
+          if (playerToken && honeypotKey && !activateNoodleBoost.isPending) {
+            activateNoodleBoost.mutate({ token: playerToken, honeypotKey });
+          }
         }}
-      >x2 mì cay</button>
+      >Nhận mì cay x2 miễn phí</button>
       {fireDrops.length > 0 && (
         <div className="level-up-rain" aria-hidden="true">
           {fireDrops.map((drop) => <span key={drop.id} className="fire-drop" style={drop.style}>{drop.emoji}</span>)}
@@ -627,7 +619,7 @@ export default function Home() {
             <DialogHeader className="robot-warning-header">
               <DialogTitle className="robot-warning-title">nghẹn mì cay rồi chậm lại tí!</DialogTitle>
               <DialogDescription id="robot-warning-description" className="robot-warning-description">
-                Hệ thống tạm khóa nút mì vì nhịp bấm quá nhanh hoặc quá đều. Đóng bằng dấu × để thử lại sau.
+                không biết nghẹn hay sao mà ăn nhanh thế? hay bạn là...
               </DialogDescription>
             </DialogHeader>
             <p className="robot-confession-progress" aria-live="polite">
@@ -640,7 +632,7 @@ export default function Home() {
                 className="robot-confession-button"
                 type="button"
                 style={{ left: robotButtonRect.left, top: robotButtonRect.top, width: robotButtonRect.width, height: robotButtonRect.height }}
-                disabled={!antiClickChallengeReady || robotConfession.isPending}
+                disabled={!antiClickChallengeReady || robotConfession.isPending || robotConfessionCount >= ROBOT_CONFESSION_TAPS_REQUIRED}
                 onClick={() => playerToken && robotConfession.mutate({ token: playerToken })}
               >
                 {robotConfession.isPending ? "…" : "Tôi là robot"}
@@ -974,10 +966,11 @@ export default function Home() {
             </ol>
           )}
           <div className="leaderboard-footnote"><span>🏆</span> Mỗi lần bấm mì cay = 1 điểm ở vị đã chọn và 1 điểm tổng.</div>
+          <div className="leaderboard-footnote"><span>🤖</span> Robot trước tên: tự nhận robot ăn mì rồi, chối cũng không kịp đâu.</div>
         </div>
       </section>
 
-      <footer className="bottom-note"><span>MI CAY CLUB</span><span className="footer-asterisk">✳</span><span>hết thèm thì thôi</span></footer>
+      <footer className="bottom-note"><span>MI CAY CLUB</span><span className="footer-asterisk">✳</span><span>hết thèm thì thôi</span><span className="footer-version">b1.2</span></footer>
     </main>
   );
 }

@@ -70,4 +70,9 @@ describe("noodle player names", () => {
     const caller = createPublicCaller();
     await expectBadRequest(() => caller.noodle.activateNoodleBoost({ token: "short" }));
   });
+
+  it("requires a per-profile honeypot key before the hidden noodle boost action", async () => {
+    const caller = createPublicCaller();
+    await expectBadRequest(() => caller.noodle.activateNoodleBoost({ token: "a".repeat(32), honeypotKey: "short" }));
+  });
 });

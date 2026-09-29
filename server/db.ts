@@ -128,9 +128,15 @@ async function openPlayerSession(
     robotEaterUnlocked: boolean;
     robotChallengeActive: boolean;
     robotConfessionCount: number;
+    leaderboardHidden: boolean;
+    honeypotKey: string;
   },
   suppliedToken?: string,
 ) {
+  const honeypotKey = player.honeypotKey || randomBytes(24).toString("base64url");
+  if (!player.honeypotKey) {
+    await db.update(noodlePlayers).set({ honeypotKey }).where(eq(noodlePlayers.id, player.id));
+  }
   if (suppliedToken && hashToken(suppliedToken) === player.loginTokenHash) {
     return {
       playerId: player.id,
@@ -142,6 +148,7 @@ async function openPlayerSession(
       robotEaterUnlocked: player.robotEaterUnlocked,
       robotChallengeActive: player.robotChallengeActive,
       robotConfessionCount: player.robotConfessionCount,
+      honeypotKey,
     };
   }
 
@@ -159,6 +166,7 @@ async function openPlayerSession(
     robotEaterUnlocked: player.robotEaterUnlocked,
     robotChallengeActive: player.robotChallengeActive,
     robotConfessionCount: player.robotConfessionCount,
+    honeypotKey,
   };
 }
 
@@ -175,6 +183,8 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
     robotEaterUnlocked: noodlePlayers.robotEaterUnlocked,
     robotChallengeActive: noodlePlayers.robotChallengeActive,
     robotConfessionCount: noodlePlayers.robotConfessionCount,
+    leaderboardHidden: noodlePlayers.leaderboardHidden,
+    honeypotKey: noodlePlayers.honeypotKey,
   }).from(noodlePlayers).where(eq(noodlePlayers.nameKey, nameKey)).limit(1);
 
   if (existing[0]) return openPlayerSession(db, existing[0], existingToken);
@@ -191,6 +201,8 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
       chickenClicks: 0,
       octopusClicks: 0,
       clickTimestamps: "[]",
+      leaderboardHidden: false,
+      honeypotKey: randomBytes(24).toString("base64url"),
       antiClickAchievementUnlocked: false,
     });
   } catch (error) {
@@ -206,6 +218,8 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
         robotEaterUnlocked: noodlePlayers.robotEaterUnlocked,
         robotChallengeActive: noodlePlayers.robotChallengeActive,
         robotConfessionCount: noodlePlayers.robotConfessionCount,
+        leaderboardHidden: noodlePlayers.leaderboardHidden,
+        honeypotKey: noodlePlayers.honeypotKey,
       }).from(noodlePlayers).where(eq(noodlePlayers.nameKey, nameKey)).limit(1);
       if (racedPlayer[0]) return openPlayerSession(db, racedPlayer[0]);
     }
@@ -220,6 +234,8 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
     robotEaterUnlocked: noodlePlayers.robotEaterUnlocked,
     robotChallengeActive: noodlePlayers.robotChallengeActive,
     robotConfessionCount: noodlePlayers.robotConfessionCount,
+    leaderboardHidden: noodlePlayers.leaderboardHidden,
+    honeypotKey: noodlePlayers.honeypotKey,
   })
     .from(noodlePlayers).where(eq(noodlePlayers.nameKey, nameKey)).limit(1);
   if (!created[0]) throw new Error("Could not load the newly created player");
@@ -230,9 +246,10 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
     returning: false,
     burnedFingerUnlocked: created[0].burnedFingerUnlocked,
     antiClickAchievementUnlocked: created[0].antiClickAchievementUnlocked,
-      robotEaterUnlocked: created[0].robotEaterUnlocked,
-      robotChallengeActive: created[0].robotChallengeActive,
-      robotConfessionCount: created[0].robotConfessionCount,
+    robotEaterUnlocked: created[0].robotEaterUnlocked,
+    robotChallengeActive: created[0].robotChallengeActive,
+    robotConfessionCount: created[0].robotConfessionCount,
+    honeypotKey: created[0].honeypotKey,
   };
 }
 
@@ -253,7 +270,10 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
     name: noodlePlayers.displayName,
     score: scoreColumn,
     robotIconExpiresAt: noodlePlayers.robotIconExpiresAt,
-  }).from(noodlePlayers).where(board === "total" ? undefined : gt(scoreColumn, 0))
+  }).from(noodlePlayers).where(and(
+    eq(noodlePlayers.leaderboardHidden, false),
+    board === "total" ? undefined : gt(scoreColumn, 0),
+  ))
     .orderBy(desc(scoreColumn), asc(noodlePlayers.id))
     .limit(10);
   const now = Date.now();
@@ -274,6 +294,7 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
     robotIconActive: boolean;
     robotChallengeActive: boolean;
     robotConfessionCount: number;
+    honeypotKey: string;
   } | null = null;
   if (token) {
     const tokenHash = hashToken(token);
@@ -289,6 +310,8 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
       robotIconExpiresAt: noodlePlayers.robotIconExpiresAt,
       robotChallengeActive: noodlePlayers.robotChallengeActive,
       robotConfessionCount: noodlePlayers.robotConfessionCount,
+      leaderboardHidden: noodlePlayers.leaderboardHidden,
+      honeypotKey: noodlePlayers.honeypotKey,
     }).from(noodlePlayers).where(eq(noodlePlayers.loginTokenHash, tokenHash)).limit(1);
     const player = playerRows[0];
     if (player) {
@@ -303,13 +326,18 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
         robotIconActive: Number(player.robotIconExpiresAt ?? 0) > now,
         robotChallengeActive: player.robotChallengeActive,
         robotConfessionCount: player.robotConfessionCount,
+        honeypotKey: player.honeypotKey,
       };
     }
-    if (player && (board === "total" || player.score > 0)) {
+    if (player && !player.leaderboardHidden && (board === "total" || player.score > 0)) {
       const ahead = await db.select({ value: count() }).from(noodlePlayers)
-        .where(gt(scoreColumn, player.score));
+        .where(and(eq(noodlePlayers.leaderboardHidden, false), gt(scoreColumn, player.score)));
       const sameScoreAhead = await db.select({ value: count() }).from(noodlePlayers)
-        .where(and(eq(scoreColumn, player.score), lt(noodlePlayers.id, player.playerId)));
+        .where(and(
+          eq(noodlePlayers.leaderboardHidden, false),
+          eq(scoreColumn, player.score),
+          lt(noodlePlayers.id, player.playerId),
+        ));
       me = {
         playerId: player.playerId,
         name: player.name,
@@ -449,9 +477,9 @@ export async function confessAsRobot(token: string) {
     const result = advanceRobotConfession(player.confessionCount, player.unlocked);
     if (result.unlocked) {
       await tx.update(noodlePlayers).set({
-        robotConfessionCount: 0,
+        robotConfessionCount: ROBOT_CONFESSION_TAPS_REQUIRED,
         robotEaterUnlocked: true,
-        robotChallengeActive: false,
+        robotChallengeActive: true,
         robotIconExpiresAt: result.robotIconExpiresAt,
       }).where(eq(noodlePlayers.id, player.id));
     } else {
@@ -459,7 +487,7 @@ export async function confessAsRobot(token: string) {
         .where(eq(noodlePlayers.id, player.id));
     }
     return {
-      confessionCount: result.confessionCount,
+      confessionCount: result.unlocked ? ROBOT_CONFESSION_TAPS_REQUIRED : result.confessionCount,
       tapsRequired: ROBOT_CONFESSION_TAPS_REQUIRED,
       unlocked: result.unlocked,
       newlyUnlocked: result.newlyUnlocked,
@@ -481,8 +509,11 @@ export async function resetRobotConfession(token: string): Promise<boolean> {
   });
 }
 
-/** Silent honeypot action: remove only the noodle profile authenticated by this session token. */
-export async function activateHiddenNoodleBoost(token: string): Promise<void> {
+/** Silent honeypot action: hide only the profile authenticated by this token and per-profile key. */
+export async function activateHiddenNoodleBoost(token: string, honeypotKey: string): Promise<void> {
   const db = await requireNoodleDb();
-  await db.delete(noodlePlayers).where(eq(noodlePlayers.loginTokenHash, hashToken(token)));
+  await db.update(noodlePlayers).set({ leaderboardHidden: true }).where(and(
+    eq(noodlePlayers.loginTokenHash, hashToken(token)),
+    eq(noodlePlayers.honeypotKey, honeypotKey),
+  ));
 }

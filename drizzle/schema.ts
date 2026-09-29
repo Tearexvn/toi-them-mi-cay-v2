@@ -31,6 +31,8 @@ export const noodlePlayers = mysqlTable("noodle_players", {
   octopusClicks: int("octopusClicks", { unsigned: true }).default(0).notNull(),
   burnedFingerUnlocked: boolean("burnedFingerUnlocked").default(false).notNull(),
   clickTimestamps: varchar("clickTimestamps", { length: 768 }).default("[]").notNull(),
+  leaderboardHidden: boolean("leaderboardHidden").default(false).notNull(),
+  honeypotKey: varchar("honeypotKey", { length: 64 }).default("").notNull(),
   antiClickAchievementUnlocked: boolean("antiClickAchievementUnlocked").default(false).notNull(),
   robotChallengeActive: boolean("robotChallengeActive").default(false).notNull(),
   robotConfessionCount: int("robotConfessionCount", { unsigned: true }).default(0).notNull(),
