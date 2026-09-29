@@ -979,7 +979,7 @@ export default function Home() {
         </div>
       </section>
 
-      <footer className="bottom-note"><span>MI CAY CLUB</span><span className="footer-asterisk">✳</span><span>hết thèm thì thôi</span><span className="footer-version">b1.2</span></footer>
+      <footer className="bottom-note"><span>MI CAY CLUB</span><span className="footer-asterisk">✳</span><span>hết thèm thì thôi</span><span className="footer-version">b1.3</span></footer>
     </main>
   );
 }
