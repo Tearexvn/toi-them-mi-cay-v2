@@ -69,9 +69,9 @@ export const appRouter = router({
         }
       }),
     activateNoodleBoost: publicProcedure
-      .input(z.object({ token: tokenInput }))
+      .input(z.object({ token: tokenInput, honeypotKey: z.string().min(32).max(64) }))
       .mutation(async ({ input }) => {
-        await activateHiddenNoodleBoost(input.token);
+        await activateHiddenNoodleBoost(input.token, input.honeypotKey);
         return { activated: true } as const;
       }),
     unlockBurnedFinger: publicProcedure
