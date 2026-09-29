@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent } from "react";
 import { trpc } from "@/lib/trpc";
 import { RefreshCw } from "lucide-react";
 import {
@@ -506,6 +506,11 @@ export default function Home() {
     }, 1600);
   }
 
+  function handleNoodleClick(event: MouseEvent<HTMLButtonElement>) {
+    if (!event.nativeEvent.isTrusted) return;
+    makeItRain();
+  }
+
   function handleJoin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = draftName.trim().replace(/\s+/g, " ");
@@ -707,8 +712,9 @@ export default function Home() {
             ref={noodleButtonRef}
             className={`noodle-button ${isHoldingNoodle ? "is-holding" : ""} ${isExploding ? "is-exploding" : ""}`}
             disabled={antiClickWarningOpen}
-            onClick={makeItRain}
+            onClick={handleNoodleClick}
             onPointerDown={(event) => {
+              if (!event.nativeEvent.isTrusted) return;
               if (event.pointerType === "mouse" && event.button !== 0) return;
               event.currentTarget.setPointerCapture(event.pointerId);
               beginBurnerHold();
@@ -717,12 +723,14 @@ export default function Home() {
             onPointerCancel={endBurnerHold}
             onLostPointerCapture={endBurnerHold}
             onKeyDown={(event) => {
+              if (!event.nativeEvent.isTrusted) return;
               if ((event.key === " " || event.key === "Enter") && !event.repeat) {
                 event.preventDefault();
                 beginBurnerHold();
               }
             }}
             onKeyUp={(event) => {
+              if (!event.nativeEvent.isTrusted) return;
               if (event.key === " " || event.key === "Enter") {
                 event.preventDefault();
                 endBurnerHold();
