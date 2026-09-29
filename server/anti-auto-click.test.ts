@@ -35,6 +35,15 @@ describe("detectSuspiciousClickPattern", () => {
     expect(detectSuspiciousClickPattern(lightlyJittered)).toBeNull();
   });
 
+  it("flags a long, repeating two-beat automation cadence but ignores jittered timing", () => {
+    const repeated = [0];
+    for (let index = 0; index < 24; index += 1) repeated.push(repeated.at(-1)! + (index % 2 === 0 ? 180 : 320));
+    expect(detectSuspiciousClickPattern(repeated.map((value) => 300_000 + value))).toBe("repeating-timing-pattern");
+
+    const jittered = repeated.map((value, index) => 400_000 + value + (index % 3) * 11);
+    expect(detectSuspiciousClickPattern(jittered)).toBeNull();
+  });
+
   it("ignores timestamps outside the rolling rate window", () => {
     const now = 200_000;
     const stale = Array.from({ length: 30 }, (_, index) => now - CLICK_RATE_WINDOW_MS - 2_000 + index * 20);

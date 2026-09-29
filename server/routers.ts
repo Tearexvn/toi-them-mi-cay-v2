@@ -3,10 +3,13 @@ import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { ENV } from "./_core/env";
 import {
+  getShadowBannedPlayers,
   getNoodleLeaderboard,
   joinNoodlePlayer,
+  liftNoodleShadowban,
   NoodleIdentityError,
   normalizeNoodleName,
   NoodleBoard,
@@ -24,6 +27,13 @@ const tokenInput = z.string().min(32).max(128);
 const moodInput = z.enum(["beef", "chicken", "octopus"]);
 const boardInput = z.enum(["total", "beef", "chicken", "octopus"]);
 
+const ownerProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Không có quyền quản lý hồ sơ mì cay." });
+  }
+  return next({ ctx });
+});
+
 function mapIdentityError(error: unknown): never {
   if (error instanceof NoodleIdentityError) {
     const code = error.reason === "name-taken" ? "CONFLICT" :
@@ -39,6 +49,7 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
+    isOwner: publicProcedure.query(({ ctx }) => Boolean(ENV.ownerOpenId && ctx.user?.openId === ENV.ownerOpenId)),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -74,6 +85,27 @@ export const appRouter = router({
         await activateHiddenNoodleBoost(input.token);
         return { activated: true } as const;
       }),
+    shadowModeration: router({
+      list: ownerProcedure.query(async () => {
+        try {
+          return await getShadowBannedPlayers();
+        } catch (error) {
+          mapIdentityError(error);
+        }
+      }),
+      lift: ownerProcedure
+        .input(z.object({ playerId: z.number().int().positive() }))
+        .mutation(async ({ input }) => {
+          try {
+            const lifted = await liftNoodleShadowban(input.playerId);
+            if (!lifted) throw new TRPCError({ code: "NOT_FOUND", message: "Hồ sơ không còn shadowban." });
+            return { lifted: true } as const;
+          } catch (error) {
+            if (error instanceof TRPCError) throw error;
+            mapIdentityError(error);
+          }
+        }),
+    }),
     unlockBurnedFinger: publicProcedure
       .input(z.object({ token: tokenInput }))
       .mutation(async ({ input }) => {
@@ -113,11 +145,11 @@ export const appRouter = router({
         }
       }),
     click: publicProcedure
-      .input(z.object({ token: tokenInput, mood: moodInput, clientFlagged: z.boolean().optional() }))
+      .input(z.object({ token: tokenInput, mood: moodInput }))
       .mutation(async ({ input }) => {
         const mood: NoodleMood = input.mood;
         try {
-          const result = await recordNoodleClick(input.token, mood, input.clientFlagged ?? false);
+          const result = await recordNoodleClick(input.token, mood);
           if (!result) throw new TRPCError({ code: "UNAUTHORIZED", message: "Phiên chơi không còn hợp lệ. Hãy nhập lại tên nhé." });
           const player = result.player;
           return {

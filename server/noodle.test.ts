@@ -40,9 +40,9 @@ describe("noodle player names", () => {
     await expectBadRequest(() => caller.noodle.join({ name: "<script>" }));
   });
 
-  it("requires a valid player token even when the client detector flags a click", async () => {
+  it("requires a valid player token for click requests", async () => {
     const caller = createPublicCaller();
-    await expectBadRequest(() => caller.noodle.click({ token: "short", mood: "beef", clientFlagged: true }));
+    await expectBadRequest(() => caller.noodle.click({ token: "short", mood: "beef" }));
   });
 
   it("rejects short tokens before attempting to unlock an achievement", async () => {
@@ -69,5 +69,11 @@ describe("noodle player names", () => {
   it("rejects malformed tokens before the hidden noodle boost action", async () => {
     const caller = createPublicCaller();
     await expectBadRequest(() => caller.noodle.activateNoodleBoost({ token: "short" }));
+  });
+
+  it("keeps shadowban moderation unavailable to unauthenticated visitors", async () => {
+    const caller = createPublicCaller();
+    await expect(caller.noodle.shadowModeration.list()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.noodle.shadowModeration.lift({ playerId: 1 })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 });

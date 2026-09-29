@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { trpc } from "@/lib/trpc";
+import { startLogin } from "@/const";
 import { RefreshCw } from "lucide-react";
 import {
   Dialog,
@@ -14,15 +15,9 @@ import {
   getUnlockedAchievements,
   isSecretHoldComplete,
   NOODLE_ACHIEVEMENTS,
-  ROBOT_CONFESSION_TAPS_REQUIRED,
   SECRET_HOLD_DURATION_MS,
 } from "@shared/noodle-achievements";
 import { leaderboardSelectionReducer, type LeaderboardBoard } from "@shared/leaderboard-selection";
-import {
-  CLICK_HISTORY_LIMIT,
-  CLICK_RATE_WINDOW_MS,
-  detectSuspiciousClickPattern,
-} from "@shared/anti-auto-click";
 import { interleaveNoodleAndTopping } from "@shared/noodle-particles";
 import {
   addNoodleExperience,
@@ -145,14 +140,7 @@ export default function Home() {
   const [achievementDialogOpen, setAchievementDialogOpen] = useState(false);
   const [activeAchievementTab, setActiveAchievementTab] = useState<AchievementTab>("achievements");
   const [achievementToastOpen, setAchievementToastOpen] = useState(false);
-  const [robotAchievementToastOpen, setRobotAchievementToastOpen] = useState(false);
-  const [robotAchievementToastText, setRobotAchievementToastText] = useState("Bạn đã nhận thành tựu ẩn “robot ăn mì”");
-  const [antiClickWarningOpen, setAntiClickWarningOpen] = useState(false);
-  const [antiClickChallengeReady, setAntiClickChallengeReady] = useState(false);
-  const [robotConfessionCount, setRobotConfessionCount] = useState(0);
   const [robotEaterUnlockedLocal, setRobotEaterUnlockedLocal] = useState(false);
-  const [robotButtonRect, setRobotButtonRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
-  const robotDialogBodyRef = useRef<HTMLDivElement | null>(null);
   const [burnedFingerUnlockedLocal, setBurnedFingerUnlockedLocal] = useState(false);
   const [antiClickAchievementUnlockedLocal, setAntiClickAchievementUnlockedLocal] = useState(false);
   const [isHoldingNoodle, setIsHoldingNoodle] = useState(false);
@@ -165,9 +153,6 @@ export default function Home() {
   const holdIntervalRef = useRef<number | null>(null);
   const holdTriggeredRef = useRef(false);
   const toastTimeoutRef = useRef<number | null>(null);
-  const robotToastTimeoutRef = useRef<number | null>(null);
-  const clientClickTimestampsRef = useRef<number[]>([]);
-  const clientClickBlockedUntilRef = useRef(0);
   const fireworksTimeoutRef = useRef<number | null>(null);
   const explosionTimeoutRef = useRef<number | null>(null);
   const [playerToken, setPlayerToken] = useState(() => readSession(TOKEN_KEY));
@@ -177,12 +162,6 @@ export default function Home() {
 
   const utils = trpc.useUtils();
 
-  function showAntiClickWarning() {
-    setRobotConfessionCount(0);
-    setAntiClickChallengeReady(false);
-    setAntiClickWarningOpen(true);
-  }
-
   const leaderboardInput = useMemo(
     () => ({ token: playerToken || undefined, board: activeBoard }),
     [playerToken, activeBoard],
@@ -191,6 +170,21 @@ export default function Home() {
     leaderboardInput,
     { refetchInterval: 10_000, refetchOnWindowFocus: true, retry: 1 },
   );
+  const ownerCheck = trpc.auth.isOwner.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
+  const shadowBans = trpc.noodle.shadowModeration.list.useQuery(undefined, {
+    enabled: ownerCheck.data === true,
+    refetchInterval: ownerCheck.data === true ? 15_000 : false,
+  });
+  const liftShadowban = trpc.noodle.shadowModeration.lift.useMutation({
+    onSuccess: async () => {
+      setNotice("Đã mở lại hồ sơ và khôi phục điểm công khai.");
+      await Promise.all([
+        utils.noodle.shadowModeration.list.invalidate(),
+        utils.noodle.leaderboard.invalidate(),
+      ]);
+    },
+    onError: (error) => setNotice(error.message || "Chưa mở lại được hồ sơ."),
+  });
   const unlockAchievement = trpc.noodle.unlockBurnedFinger.useMutation({
     onSuccess: (result) => {
       setBurnedFingerUnlockedLocal(true);
@@ -223,48 +217,10 @@ export default function Home() {
       document.removeEventListener("visibilitychange", cancelHoldOnHiddenPage);
       if (holdIntervalRef.current !== null) window.clearInterval(holdIntervalRef.current);
       if (toastTimeoutRef.current !== null) window.clearTimeout(toastTimeoutRef.current);
-      if (robotToastTimeoutRef.current !== null) window.clearTimeout(robotToastTimeoutRef.current);
       if (fireworksTimeoutRef.current !== null) window.clearTimeout(fireworksTimeoutRef.current);
       if (explosionTimeoutRef.current !== null) window.clearTimeout(explosionTimeoutRef.current);
     };
   }, []);
-  useEffect(() => {
-    if (!antiClickWarningOpen) {
-      setRobotButtonRect(null);
-      return;
-    }
-    let frame = 0;
-    const updatePosition = () => {
-      const button = noodleButtonRef.current?.getBoundingClientRect();
-      const dialogBody = robotDialogBodyRef.current?.getBoundingClientRect();
-      if (!button || !dialogBody) return;
-      setRobotButtonRect({
-        left: button.left - dialogBody.left,
-        top: button.top - dialogBody.top,
-        width: button.width,
-        height: button.height,
-      });
-    };
-    frame = window.requestAnimationFrame(updatePosition);
-    const settleTimer = window.setTimeout(updatePosition, 280);
-    const finalTimer = window.setTimeout(updatePosition, 620);
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(settleTimer);
-      window.clearTimeout(finalTimer);
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [antiClickWarningOpen]);
-  useEffect(() => {
-    const player = leaderboard.data?.player;
-    if (!player?.robotChallengeActive) return;
-    setRobotConfessionCount(player.robotConfessionCount);
-    setAntiClickChallengeReady(true);
-    setAntiClickWarningOpen(true);
-  }, [leaderboard.data?.player?.robotChallengeActive, leaderboard.data?.player?.robotConfessionCount]);
   const joinPlayer = trpc.noodle.join.useMutation({
     onSuccess: (session) => {
       try {
@@ -278,13 +234,8 @@ export default function Home() {
       setBurnedFingerUnlockedLocal(session.burnedFingerUnlocked);
       setRobotEaterUnlockedLocal(session.robotEaterUnlocked);
       holdTriggeredRef.current = false;
-      clientClickTimestampsRef.current = [];
-      clientClickBlockedUntilRef.current = 0;
       setDraftName("");
       setAntiClickAchievementUnlockedLocal(session.antiClickAchievementUnlocked);
-      setAntiClickWarningOpen(false);
-      setAntiClickChallengeReady(false);
-      setRobotConfessionCount(0);
       optimisticExperienceRef.current = null;
       setOptimisticExperience(null);
       setXpGainPops([]);
@@ -295,87 +246,30 @@ export default function Home() {
     },
   });
   const activateNoodleBoost = trpc.noodle.activateNoodleBoost.useMutation({
-    onSuccess: (_result, variables) => {
-      if (variables.token !== playerToken) return;
-      try {
-        window.localStorage.removeItem(TOKEN_KEY);
-        window.localStorage.removeItem(NAME_KEY);
-      } catch {
-        // Reload also clears the in-memory identity.
-      }
-      window.location.replace(window.location.pathname);
-    },
+    onSuccess: () => void utils.noodle.leaderboard.invalidate(),
   });
   const recordClick = trpc.noodle.click.useMutation({
     onSuccess: async (result, variables) => {
       if (variables.token === playerToken) {
-        if (result.accepted) {
-          const reconciled = maxNoodleExperience(
-            optimisticExperienceRef.current ?? result.experience,
-            result.experience,
-          );
-          optimisticExperienceRef.current = reconciled;
-          setOptimisticExperience(reconciled);
-        } else {
-          if (!variables.clientFlagged) {
-            const rolledBack = removeNoodleExperience(optimisticExperienceRef.current ?? experience);
-            optimisticExperienceRef.current = rolledBack;
-            setOptimisticExperience(rolledBack);
-          }
-          setParticles([]);
-          setXpGainPops([]);
-          setFireDrops([]);
-          setAntiClickAchievementUnlockedLocal(result.antiClickAchievementUnlocked);
-          setAchievementToastOpen(false);
-          if (toastTimeoutRef.current !== null) window.clearTimeout(toastTimeoutRef.current);
-          showAntiClickWarning();
-          setAntiClickChallengeReady(true);
-          if (result.newlyUnlockedAntiClick) {
-            const fireworks = createAchievementFireworks();
-            setAchievementFireworks(fireworks);
-            if (fireworksTimeoutRef.current !== null) window.clearTimeout(fireworksTimeoutRef.current);
-            fireworksTimeoutRef.current = window.setTimeout(() => setAchievementFireworks([]), 2_500);
-          }
-        }
+        const reconciled = maxNoodleExperience(
+          optimisticExperienceRef.current ?? result.experience,
+          result.experience,
+        );
+        optimisticExperienceRef.current = reconciled;
+        setOptimisticExperience(reconciled);
       }
       await utils.noodle.leaderboard.invalidate();
     },
     onError: async (error, variables) => {
-      if (variables.token === playerToken && !variables.clientFlagged) {
+      if (variables.token === playerToken) {
         const rolledBack = removeNoodleExperience(optimisticExperienceRef.current ?? experience);
         optimisticExperienceRef.current = rolledBack;
         setOptimisticExperience(rolledBack);
       }
-      if (!variables.clientFlagged) setNotice(error.message || "Không ghi được lượt bấm. Thử lại nhé.");
+      setNotice(error.message || "Không ghi được lượt bấm. Thử lại nhé.");
       await utils.noodle.leaderboard.invalidate();
     },
   });
-  const robotConfession = trpc.noodle.confessAsRobot.useMutation({
-    onSuccess: async (result) => {
-      setRobotConfessionCount(result.confessionCount);
-      if (result.unlocked) {
-        setAntiClickWarningOpen(false);
-        setAntiClickChallengeReady(false);
-        setRobotEaterUnlockedLocal(true);
-        setRobotAchievementToastOpen(true);
-        if (robotToastTimeoutRef.current !== null) window.clearTimeout(robotToastTimeoutRef.current);
-        robotToastTimeoutRef.current = window.setTimeout(() => setRobotAchievementToastOpen(false), 5_500);
-        const fireworks = createAchievementFireworks();
-        setAchievementFireworks(fireworks);
-        if (fireworksTimeoutRef.current !== null) window.clearTimeout(fireworksTimeoutRef.current);
-        fireworksTimeoutRef.current = window.setTimeout(() => setAchievementFireworks([]), 2_500);
-        await utils.noodle.leaderboard.invalidate();
-      }
-    },
-    onError: (error) => setNotice(error.message || "Chưa ghi nhận được lần thú nhận này."),
-  });
-  const resetRobotChallenge = trpc.noodle.resetRobotConfession.useMutation();
-  function closeAntiClickWarning() {
-    setAntiClickWarningOpen(false);
-    setAntiClickChallengeReady(false);
-    setRobotConfessionCount(0);
-    if (playerToken) resetRobotChallenge.mutate({ token: playerToken });
-  }
 
   const activeMood = moods.find((item) => item.id === mood) ?? moods[0];
   const lastRecordedTotalClicks = recordClick.variables?.token === playerToken
@@ -458,21 +352,6 @@ export default function Home() {
     }
 
     const now = Date.now();
-    if (now < clientClickBlockedUntilRef.current) return;
-    const clickTimestamps = [...clientClickTimestampsRef.current, now].slice(-CLICK_HISTORY_LIMIT);
-    clientClickTimestampsRef.current = clickTimestamps;
-    const suspiciousClickReason = detectSuspiciousClickPattern(clickTimestamps, now);
-    if (suspiciousClickReason) {
-      clientClickTimestampsRef.current = [];
-      clientClickBlockedUntilRef.current = now + CLICK_RATE_WINDOW_MS;
-      setParticles([]);
-      setXpGainPops([]);
-      setFireDrops([]);
-      showAntiClickWarning();
-      recordClick.mutate({ token: playerToken, mood, clientFlagged: true });
-      return;
-    }
-
     const burstEmojis = interleaveNoodleAndTopping(activeMood.emoji, 14);
     const newParticles = Array.from({ length: 14 }, (_, index) => {
       const angle = (Math.PI * 2 * index) / 14 + Math.random() * 0.5;
@@ -513,7 +392,7 @@ export default function Home() {
         setFireDrops((current) => current.filter((drop) => !expiredIds.has(drop.id)));
       }, 3300);
     }
-    recordClick.mutate({ token: playerToken, mood, clientFlagged: false });
+    recordClick.mutate({ token: playerToken, mood });
     window.setTimeout(() => {
       setParticles((current) => current.filter((particle) => !newParticles.some((created) => created.id === particle.id)));
     }, 1600);
@@ -542,11 +421,6 @@ export default function Home() {
     setBurnedFingerUnlockedLocal(false);
     setAntiClickAchievementUnlockedLocal(false);
     setRobotEaterUnlockedLocal(false);
-    setAntiClickWarningOpen(false);
-    setAntiClickChallengeReady(false);
-    setRobotConfessionCount(0);
-    clientClickTimestampsRef.current = [];
-    clientClickBlockedUntilRef.current = 0;
     holdTriggeredRef.current = false;
     holdStartedAtRef.current = null;
     if (holdIntervalRef.current !== null) window.clearInterval(holdIntervalRef.current);
@@ -604,51 +478,6 @@ export default function Home() {
           </div>
         </div>
       )}
-      {robotAchievementToastOpen && (
-        <div className="achievement-toast-wrap">
-          <div className="achievement-toast anti-click-toast" role="status" aria-live="polite" aria-atomic="true">
-            <span className="achievement-toast-icon" aria-hidden="true">🤖</span>
-            <span className="achievement-toast-copy">Bạn đã nhận được thành tựu ẩn <strong>“robot ăn mì”</strong></span>
-            <button className="achievement-toast-close" type="button" aria-label="Đóng thông báo thành tựu robot" onClick={() => setRobotAchievementToastOpen(false)}>×</button>
-          </div>
-        </div>
-      )}
-      <Dialog open={antiClickWarningOpen} onOpenChange={(open) => { if (open) setAntiClickWarningOpen(true); }}>
-        <DialogContent
-          className="robot-warning-dialog"
-          showCloseButton={false}
-          onEscapeKeyDown={(event) => event.preventDefault()}
-          onPointerDownOutside={(event) => event.preventDefault()}
-          aria-describedby="robot-warning-description"
-        >
-          <div className="robot-warning-body" ref={robotDialogBodyRef}>
-            <button className="robot-warning-close" type="button" aria-label="Đóng cảnh báo" onClick={closeAntiClickWarning}>×</button>
-            <div className="robot-warning-icon" aria-hidden="true">🤖</div>
-            <DialogHeader className="robot-warning-header">
-              <DialogTitle className="robot-warning-title">nghẹn mì cay rồi chậm lại tí!</DialogTitle>
-              <DialogDescription id="robot-warning-description" className="robot-warning-description">
-                Hệ thống tạm khóa nút mì vì nhịp bấm quá nhanh hoặc quá đều. Đóng bằng dấu × để thử lại sau.
-              </DialogDescription>
-            </DialogHeader>
-            <p className="robot-confession-progress" aria-live="polite">
-              {antiClickChallengeReady
-                ? `Tôi là robot: ${robotConfessionCount} / 10`
-                : "Đang xác nhận lượt bấm bị chặn…"}
-            </p>
-            {robotButtonRect && (
-              <button
-                className="robot-confession-button"
-                type="button"
-                style={{ left: robotButtonRect.left, top: robotButtonRect.top, width: robotButtonRect.width, height: robotButtonRect.height }}
-                disabled={!antiClickChallengeReady || robotConfession.isPending}
-                onClick={() => playerToken && robotConfession.mutate({ token: playerToken })}
-              >
-                {robotConfession.isPending ? "…" : "Tôi là robot"}
-              </button>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
       <div className="ambient ambient-one" aria-hidden="true">{activeMood.emoji}</div>
       <div className="ambient ambient-two" aria-hidden="true">🌶️</div>
       <div className="ambient ambient-three" aria-hidden="true">{activeMood.emoji}</div>
@@ -714,7 +543,6 @@ export default function Home() {
           <button
             ref={noodleButtonRef}
             className={`noodle-button ${isHoldingNoodle ? "is-holding" : ""} ${isExploding ? "is-exploding" : ""}`}
-            disabled={antiClickWarningOpen}
             onClick={makeItRain}
             onPointerDown={(event) => {
               if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -976,6 +804,50 @@ export default function Home() {
           <div className="leaderboard-footnote"><span>🏆</span> Mỗi lần bấm mì cay = 1 điểm ở vị đã chọn và 1 điểm tổng.</div>
         </div>
       </section>
+
+      {ownerCheck.data === false && (
+        <div className="owner-access-link">
+          <button type="button" onClick={() => startLogin()}>Đăng nhập quản lý</button>
+        </div>
+      )}
+      {ownerCheck.data === true && (
+        <section className="shadow-moderation-card" aria-labelledby="shadow-moderation-title">
+          <div className="shadow-moderation-heading">
+            <div>
+              <p className="leaderboard-eyebrow">CHỈ CHỦ WEB MỚI THẤY</p>
+              <h2 id="shadow-moderation-title">Hồ sơ cần xem lại</h2>
+            </div>
+            <span className="shadow-ban-count">{shadowBans.data?.length ?? 0}</span>
+          </div>
+          {shadowBans.isLoading ? (
+            <p className="shadow-moderation-empty">Đang tải danh sách…</p>
+          ) : shadowBans.error ? (
+            <p className="shadow-moderation-empty">Không tải được danh sách. Hãy tải lại trang quản lý.</p>
+          ) : !shadowBans.data?.length ? (
+            <p className="shadow-moderation-empty">Chưa có hồ sơ nào cần xem lại.</p>
+          ) : (
+            <ul className="shadow-ban-list">
+              {shadowBans.data.map((entry) => (
+                <li className="shadow-ban-row" key={entry.playerId}>
+                  <div className="shadow-ban-copy">
+                    <strong>{entry.name}</strong>
+                    <span>Lý do: {entry.reason ?? "không rõ"} · {entry.bannedAt ? new Date(entry.bannedAt).toLocaleString("vi-VN") : "không rõ thời điểm"}</span>
+                    <small>Điểm công khai đang giữ: {entry.publicTotalClicks.toLocaleString("vi-VN")} · số hiển thị riêng: {entry.decoyTotalClicks.toLocaleString("vi-VN")}</small>
+                  </div>
+                  <button
+                    className="shadow-ban-lift"
+                    type="button"
+                    disabled={liftShadowban.isPending}
+                    onClick={() => liftShadowban.mutate({ playerId: entry.playerId })}
+                  >
+                    Mở shadowban
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       <footer className="bottom-note"><span>MI CAY CLUB</span><span className="footer-asterisk">✳</span><span>hết thèm thì thôi</span></footer>
     </main>

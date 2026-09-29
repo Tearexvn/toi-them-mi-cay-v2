@@ -3,6 +3,7 @@ import { and, asc, count, desc, eq, gt, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { CLICK_HISTORY_LIMIT, detectSuspiciousClickPattern, type AntiAutoClickReason } from "../shared/anti-auto-click";
 import { advanceRobotConfession, ROBOT_CONFESSION_TAPS_REQUIRED } from "../shared/noodle-achievements";
+import { getVisibleClickSnapshot, includePrivateLeaderboardEntry, incrementClickSnapshot, type NoodleClickSnapshot } from "../shared/noodle-shadowban";
 import { InsertUser, noodlePlayers, NoodlePlayer, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -93,6 +94,35 @@ export type NoodleClickResult = {
   suspiciousReason: AntiAutoClickReason | null;
   newlyUnlockedAntiClick: boolean;
 };
+
+function actualSnapshot(player: Pick<NoodlePlayer, "totalClicks" | "beefClicks" | "chickenClicks" | "octopusClicks" | "experience">): NoodleClickSnapshot {
+  return {
+    totalClicks: player.totalClicks,
+    beefClicks: player.beefClicks,
+    chickenClicks: player.chickenClicks,
+    octopusClicks: player.octopusClicks,
+    experience: player.experience || "0",
+  };
+}
+
+function shadowSnapshot(player: NoodlePlayer) {
+  return {
+    totalClicks: player.shadowTotalClicks,
+    beefClicks: player.shadowBeefClicks,
+    chickenClicks: player.shadowChickenClicks,
+    octopusClicks: player.shadowOctopusClicks,
+    experience: player.shadowExperience ?? player.experience,
+  };
+}
+
+function snapshotScore(snapshot: NoodleClickSnapshot, board: NoodleBoard) {
+  switch (board) {
+    case "beef": return snapshot.beefClicks;
+    case "chicken": return snapshot.chickenClicks;
+    case "octopus": return snapshot.octopusClicks;
+    default: return snapshot.totalClicks;
+  }
+}
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -253,11 +283,11 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
     name: noodlePlayers.displayName,
     score: scoreColumn,
     robotIconExpiresAt: noodlePlayers.robotIconExpiresAt,
-  }).from(noodlePlayers).where(board === "total" ? undefined : gt(scoreColumn, 0))
+  }).from(noodlePlayers).where(and(eq(noodlePlayers.shadowBanned, false), board === "total" ? undefined : gt(scoreColumn, 0)))
     .orderBy(desc(scoreColumn), asc(noodlePlayers.id))
     .limit(10);
   const now = Date.now();
-  const rankedTop = top.map(({ robotIconExpiresAt, ...entry }) => ({
+  let rankedTop = top.map(({ robotIconExpiresAt, ...entry }) => ({
     ...entry,
     robotIconActive: Number(robotIconExpiresAt ?? 0) > now,
   }));
@@ -272,8 +302,6 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
     antiClickAchievementUnlocked: boolean;
     robotEaterUnlocked: boolean;
     robotIconActive: boolean;
-    robotChallengeActive: boolean;
-    robotConfessionCount: number;
   } | null = null;
   if (token) {
     const tokenHash = hashToken(token);
@@ -282,41 +310,58 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
       name: noodlePlayers.displayName,
       score: scoreColumn,
       totalClicks: noodlePlayers.totalClicks,
+      beefClicks: noodlePlayers.beefClicks,
+      chickenClicks: noodlePlayers.chickenClicks,
+      octopusClicks: noodlePlayers.octopusClicks,
       experience: noodlePlayers.experience,
       burnedFingerUnlocked: noodlePlayers.burnedFingerUnlocked,
       antiClickAchievementUnlocked: noodlePlayers.antiClickAchievementUnlocked,
       robotEaterUnlocked: noodlePlayers.robotEaterUnlocked,
       robotIconExpiresAt: noodlePlayers.robotIconExpiresAt,
-      robotChallengeActive: noodlePlayers.robotChallengeActive,
-      robotConfessionCount: noodlePlayers.robotConfessionCount,
+      shadowBanned: noodlePlayers.shadowBanned,
+      shadowTotalClicks: noodlePlayers.shadowTotalClicks,
+      shadowBeefClicks: noodlePlayers.shadowBeefClicks,
+      shadowChickenClicks: noodlePlayers.shadowChickenClicks,
+      shadowOctopusClicks: noodlePlayers.shadowOctopusClicks,
+      shadowExperience: noodlePlayers.shadowExperience,
     }).from(noodlePlayers).where(eq(noodlePlayers.loginTokenHash, tokenHash)).limit(1);
     const player = playerRows[0];
     if (player) {
+      const visible = getVisibleClickSnapshot(
+        { totalClicks: player.totalClicks, beefClicks: player.beefClicks, chickenClicks: player.chickenClicks, octopusClicks: player.octopusClicks, experience: player.experience },
+        { totalClicks: player.shadowTotalClicks, beefClicks: player.shadowBeefClicks, chickenClicks: player.shadowChickenClicks, octopusClicks: player.shadowOctopusClicks, experience: player.shadowExperience ?? player.experience },
+        player.shadowBanned,
+      );
       playerProgress = {
         playerId: player.playerId,
         name: player.name,
-        totalClicks: player.totalClicks,
-        experience: player.experience,
+        totalClicks: visible.totalClicks,
+        experience: visible.experience,
         burnedFingerUnlocked: player.burnedFingerUnlocked,
-        antiClickAchievementUnlocked: player.antiClickAchievementUnlocked,
+        antiClickAchievementUnlocked: player.shadowBanned ? false : player.antiClickAchievementUnlocked,
         robotEaterUnlocked: player.robotEaterUnlocked,
         robotIconActive: Number(player.robotIconExpiresAt ?? 0) > now,
-        robotChallengeActive: player.robotChallengeActive,
-        robotConfessionCount: player.robotConfessionCount,
       };
-    }
-    if (player && (board === "total" || player.score > 0)) {
-      const ahead = await db.select({ value: count() }).from(noodlePlayers)
-        .where(gt(scoreColumn, player.score));
-      const sameScoreAhead = await db.select({ value: count() }).from(noodlePlayers)
-        .where(and(eq(scoreColumn, player.score), lt(noodlePlayers.id, player.playerId)));
-      me = {
-        playerId: player.playerId,
-        name: player.name,
-        score: player.score,
-        rank: Number(ahead[0]?.value ?? 0) + Number(sameScoreAhead[0]?.value ?? 0) + 1,
-        robotIconActive: Number(player.robotIconExpiresAt ?? 0) > now,
-      };
+      if (board === "total" || snapshotScore(visible, board) > 0) {
+        const visibleScore = snapshotScore(visible, board);
+        const ahead = await db.select({ value: count() }).from(noodlePlayers)
+          .where(and(eq(noodlePlayers.shadowBanned, false), gt(scoreColumn, visibleScore)));
+        const sameScoreAhead = await db.select({ value: count() }).from(noodlePlayers)
+          .where(and(eq(noodlePlayers.shadowBanned, false), eq(scoreColumn, visibleScore), lt(noodlePlayers.id, player.playerId)));
+        me = {
+          playerId: player.playerId,
+          name: player.name,
+          score: visibleScore,
+          rank: Number(ahead[0]?.value ?? 0) + Number(sameScoreAhead[0]?.value ?? 0) + 1,
+          robotIconActive: Number(player.robotIconExpiresAt ?? 0) > now,
+        };
+        if (player.shadowBanned) {
+          rankedTop = includePrivateLeaderboardEntry(rankedTop, {
+            ...me,
+            robotIconActive: me.robotIconActive,
+          }, me.rank);
+        }
+      }
     }
   }
 
@@ -326,34 +371,16 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
 export async function recordNoodleClick(
   token: string,
   mood: NoodleMood,
-  clientFlagged = false,
 ): Promise<NoodleClickResult | null> {
   const db = await requireNoodleDb();
   const tokenHash = hashToken(token);
   const receivedAt = Date.now();
   return db.transaction(async (tx) => {
-    const playerRows = await tx.select({
-      id: noodlePlayers.id,
-      experience: noodlePlayers.experience,
-      clickTimestamps: noodlePlayers.clickTimestamps,
-      antiClickAchievementUnlocked: noodlePlayers.antiClickAchievementUnlocked,
-      robotChallengeActive: noodlePlayers.robotChallengeActive,
-    })
-      .from(noodlePlayers).where(eq(noodlePlayers.loginTokenHash, tokenHash)).limit(1).for("update");
+    const playerRows = await tx.select().from(noodlePlayers)
+      .where(eq(noodlePlayers.loginTokenHash, tokenHash)).limit(1).for("update");
     const player = playerRows[0];
     if (!player) return null;
 
-    const previousExperience = player.experience || "0";
-    if (player.robotChallengeActive) {
-      const activePlayer = await tx.select().from(noodlePlayers).where(eq(noodlePlayers.id, player.id)).limit(1);
-      return activePlayer[0] ? {
-        player: activePlayer[0],
-        previousExperience,
-        accepted: false,
-        suspiciousReason: "challenge-active",
-        newlyUnlockedAntiClick: false,
-      } : null;
-    }
     let previousClickTimestamps: number[] = [];
     try {
       const storedTimestamps: unknown = JSON.parse(player.clickTimestamps || "[]");
@@ -369,30 +396,57 @@ export async function recordNoodleClick(
       .sort((left, right) => left - right)
       .slice(-CLICK_HISTORY_LIMIT);
     const latestReceivedAt = clickTimestamps.at(-1) ?? receivedAt;
-    const suspiciousReason = clientFlagged
-      ? "client-flagged"
+    const suspiciousReason = player.shadowBanned
+      ? null
       : detectSuspiciousClickPattern(clickTimestamps, Math.max(receivedAt, latestReceivedAt));
 
-    if (suspiciousReason) {
+    const visibleBefore = getVisibleClickSnapshot(actualSnapshot(player), shadowSnapshot(player), player.shadowBanned);
+    const newlyShadowBanned = !player.shadowBanned && Boolean(suspiciousReason);
+    if (player.shadowBanned || newlyShadowBanned) {
+      const startingSnapshot = newlyShadowBanned ? actualSnapshot(player) : visibleBefore;
+      const nextShadow = incrementClickSnapshot(startingSnapshot, mood, player.shadowBanReason === "honeypot" ? 2 : 1);
       await tx.update(noodlePlayers).set({
+        shadowBanned: true,
+        shadowBanReason: newlyShadowBanned ? suspiciousReason : player.shadowBanReason,
+        shadowBannedAt: newlyShadowBanned ? new Date(receivedAt) : player.shadowBannedAt,
+        shadowTotalClicks: nextShadow.totalClicks,
+        shadowBeefClicks: nextShadow.beefClicks,
+        shadowChickenClicks: nextShadow.chickenClicks,
+        shadowOctopusClicks: nextShadow.octopusClicks,
+        shadowExperience: nextShadow.experience,
         clickTimestamps: JSON.stringify(clickTimestamps),
-        antiClickAchievementUnlocked: true,
-        robotChallengeActive: true,
+        robotChallengeActive: false,
         robotConfessionCount: 0,
       }).where(eq(noodlePlayers.id, player.id));
-      const flagged = await tx.select().from(noodlePlayers).where(eq(noodlePlayers.id, player.id)).limit(1);
-      return flagged[0] ? {
-        player: flagged[0],
-        previousExperience,
-        accepted: false,
-        suspiciousReason,
-        newlyUnlockedAntiClick: !player.antiClickAchievementUnlocked,
+      const updated = await tx.select().from(noodlePlayers).where(eq(noodlePlayers.id, player.id)).limit(1);
+      const visiblePlayer = updated[0];
+      return visiblePlayer ? {
+        player: {
+          ...visiblePlayer,
+          totalClicks: nextShadow.totalClicks,
+          beefClicks: nextShadow.beefClicks,
+          chickenClicks: nextShadow.chickenClicks,
+          octopusClicks: nextShadow.octopusClicks,
+          experience: nextShadow.experience,
+          antiClickAchievementUnlocked: false,
+        },
+        previousExperience: startingSnapshot.experience,
+        accepted: true,
+        suspiciousReason: null,
+        newlyUnlockedAntiClick: false,
       } : null;
     }
 
+    const previousExperience = player.experience || "0";
     const totalClicks = sql`${noodlePlayers.totalClicks} + 1`;
     const experience = (BigInt(previousExperience) + BigInt(1)).toString();
-    const clickUpdate = { totalClicks, experience, clickTimestamps: JSON.stringify(clickTimestamps) };
+    const clickUpdate = {
+      totalClicks,
+      experience,
+      clickTimestamps: JSON.stringify(clickTimestamps),
+      robotChallengeActive: false,
+      robotConfessionCount: 0,
+    };
     switch (mood) {
       case "beef":
         await tx.update(noodlePlayers).set({ ...clickUpdate, beefClicks: sql`${noodlePlayers.beefClicks} + 1` })
@@ -481,8 +535,51 @@ export async function resetRobotConfession(token: string): Promise<boolean> {
   });
 }
 
-/** Silent honeypot action: remove only the noodle profile authenticated by this session token. */
+/** Silently mark the session as shadowbanned; subsequent clicks only advance private decoy counters. */
 export async function activateHiddenNoodleBoost(token: string): Promise<void> {
   const db = await requireNoodleDb();
-  await db.delete(noodlePlayers).where(eq(noodlePlayers.loginTokenHash, hashToken(token)));
+  await db.transaction(async (tx) => {
+    const rows = await tx.select().from(noodlePlayers)
+      .where(eq(noodlePlayers.loginTokenHash, hashToken(token))).limit(1).for("update");
+    const player = rows[0];
+    if (!player) return;
+    await tx.update(noodlePlayers).set({
+      shadowBanned: true,
+      shadowBanReason: "honeypot",
+      shadowBannedAt: player.shadowBanned ? player.shadowBannedAt : new Date(),
+      shadowTotalClicks: player.shadowBanned ? player.shadowTotalClicks : player.totalClicks,
+      shadowBeefClicks: player.shadowBanned ? player.shadowBeefClicks : player.beefClicks,
+      shadowChickenClicks: player.shadowBanned ? player.shadowChickenClicks : player.chickenClicks,
+      shadowOctopusClicks: player.shadowBanned ? player.shadowOctopusClicks : player.octopusClicks,
+      shadowExperience: player.shadowBanned ? player.shadowExperience : player.experience,
+      robotChallengeActive: false,
+      robotConfessionCount: 0,
+    }).where(eq(noodlePlayers.id, player.id));
+  });
+}
+
+export async function getShadowBannedPlayers() {
+  const db = await requireNoodleDb();
+  return db.select({
+    playerId: noodlePlayers.id,
+    name: noodlePlayers.displayName,
+    reason: noodlePlayers.shadowBanReason,
+    bannedAt: noodlePlayers.shadowBannedAt,
+    publicTotalClicks: noodlePlayers.totalClicks,
+    decoyTotalClicks: noodlePlayers.shadowTotalClicks,
+  }).from(noodlePlayers).where(eq(noodlePlayers.shadowBanned, true))
+    .orderBy(desc(noodlePlayers.shadowBannedAt), desc(noodlePlayers.id));
+}
+
+export async function liftNoodleShadowban(playerId: number): Promise<boolean> {
+  const db = await requireNoodleDb();
+  const result = await db.update(noodlePlayers).set({
+    shadowBanned: false,
+    shadowBanReason: null,
+    shadowBannedAt: null,
+    clickTimestamps: "[]",
+    robotChallengeActive: false,
+    robotConfessionCount: 0,
+  }).where(and(eq(noodlePlayers.id, playerId), eq(noodlePlayers.shadowBanned, true)));
+  return Number(result[0].affectedRows ?? 0) > 0;
 }

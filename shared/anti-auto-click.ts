@@ -5,10 +5,10 @@ export const MACHINE_PATTERN_INTERVAL_COUNT = 20;
 
 const MIN_MACHINE_INTERVAL_MS = 50;
 const MAX_MACHINE_INTERVAL_MS = 900;
-const MAX_MACHINE_INTERVAL_SPREAD_MS = 8;
-const MAX_MACHINE_INTERVAL_COEFFICIENT_OF_VARIATION = 0.015;
+const MAX_MACHINE_INTERVAL_SPREAD_MS = 2;
+const MAX_MACHINE_INTERVAL_COEFFICIENT_OF_VARIATION = 0.005;
 
-export type AntiAutoClickReason = "rate-limit" | "machine-like-timing" | "client-flagged" | "challenge-active";
+export type AntiAutoClickReason = "rate-limit" | "machine-like-timing" | "repeating-timing-pattern";
 
 /**
  * Inspects server-received click timestamps. A rate-limit breach always wins;
@@ -31,6 +31,20 @@ export function detectSuspiciousClickPattern(
   const intervals = sample.slice(1).map((timestamp, index) => timestamp - sample[index]);
   if (intervals.some((interval) => interval < MIN_MACHINE_INTERVAL_MS || interval > MAX_MACHINE_INTERVAL_MS)) {
     return null;
+  }
+
+  // Also catch a repeated 2–4 beat automation loop with highly repeatable pauses.
+  // Requiring 24 intervals and only 2ms tolerance makes ordinary human rhythm unlikely to match.
+  const repeatedSample = valid.slice(-25);
+  if (repeatedSample.length === 25) {
+    const repeatedIntervals = repeatedSample.slice(1).map((timestamp, index) => timestamp - repeatedSample[index]);
+    for (let cycleLength = 2; cycleLength <= 4; cycleLength += 1) {
+      const baseline = repeatedIntervals.slice(0, cycleLength);
+      const repeatsExactly = repeatedIntervals.every((interval, index) =>
+        Math.abs(interval - baseline[index % cycleLength]) <= 2,
+      );
+      if (repeatsExactly && new Set(baseline).size > 1) return "repeating-timing-pattern";
+    }
   }
 
   const mean = intervals.reduce((sum, interval) => sum + interval, 0) / intervals.length;
