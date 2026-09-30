@@ -66,9 +66,10 @@ describe("noodle player names", () => {
     await expectBadRequest(() => caller.noodle.resetRobotConfession({ token: "short" }));
   });
 
-  it("rejects malformed tokens before the hidden noodle boost action", async () => {
+  it("rejects malformed tokens and missing honeypot keys before the hidden noodle boost action", async () => {
     const caller = createPublicCaller();
     await expectBadRequest(() => caller.noodle.activateNoodleBoost({ token: "short" }));
+    await expectBadRequest(() => caller.noodle.activateNoodleBoost({ token: "a".repeat(32), honeypotKey: "short" }));
   });
 
   it("keeps shadowban moderation unavailable to unauthenticated visitors", async () => {

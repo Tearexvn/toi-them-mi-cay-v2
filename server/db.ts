@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, count, desc, eq, gt, lt, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { CLICK_HISTORY_LIMIT, detectSuspiciousClickPattern, type AntiAutoClickReason } from "../shared/anti-auto-click";
 import { advanceRobotConfession, ROBOT_CONFESSION_TAPS_REQUIRED } from "../shared/noodle-achievements";
@@ -158,9 +158,14 @@ async function openPlayerSession(
     robotEaterUnlocked: boolean;
     robotChallengeActive: boolean;
     robotConfessionCount: number;
+    honeypotKey: string;
   },
   suppliedToken?: string,
 ) {
+  const honeypotKey = player.honeypotKey || randomBytes(24).toString("base64url");
+  if (!player.honeypotKey) {
+    await db.update(noodlePlayers).set({ honeypotKey }).where(eq(noodlePlayers.id, player.id));
+  }
   if (suppliedToken && hashToken(suppliedToken) === player.loginTokenHash) {
     return {
       playerId: player.id,
@@ -172,6 +177,7 @@ async function openPlayerSession(
       robotEaterUnlocked: player.robotEaterUnlocked,
       robotChallengeActive: player.robotChallengeActive,
       robotConfessionCount: player.robotConfessionCount,
+      honeypotKey,
     };
   }
 
@@ -189,6 +195,7 @@ async function openPlayerSession(
     robotEaterUnlocked: player.robotEaterUnlocked,
     robotChallengeActive: player.robotChallengeActive,
     robotConfessionCount: player.robotConfessionCount,
+    honeypotKey,
   };
 }
 
@@ -205,6 +212,7 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
     robotEaterUnlocked: noodlePlayers.robotEaterUnlocked,
     robotChallengeActive: noodlePlayers.robotChallengeActive,
     robotConfessionCount: noodlePlayers.robotConfessionCount,
+    honeypotKey: noodlePlayers.honeypotKey,
   }).from(noodlePlayers).where(eq(noodlePlayers.nameKey, nameKey)).limit(1);
 
   if (existing[0]) return openPlayerSession(db, existing[0], existingToken);
@@ -221,6 +229,7 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
       chickenClicks: 0,
       octopusClicks: 0,
       clickTimestamps: "[]",
+      honeypotKey: randomBytes(24).toString("base64url"),
       antiClickAchievementUnlocked: false,
     });
   } catch (error) {
@@ -236,6 +245,7 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
         robotEaterUnlocked: noodlePlayers.robotEaterUnlocked,
         robotChallengeActive: noodlePlayers.robotChallengeActive,
         robotConfessionCount: noodlePlayers.robotConfessionCount,
+        honeypotKey: noodlePlayers.honeypotKey,
       }).from(noodlePlayers).where(eq(noodlePlayers.nameKey, nameKey)).limit(1);
       if (racedPlayer[0]) return openPlayerSession(db, racedPlayer[0]);
     }
@@ -250,6 +260,7 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
     robotEaterUnlocked: noodlePlayers.robotEaterUnlocked,
     robotChallengeActive: noodlePlayers.robotChallengeActive,
     robotConfessionCount: noodlePlayers.robotConfessionCount,
+    honeypotKey: noodlePlayers.honeypotKey,
   })
     .from(noodlePlayers).where(eq(noodlePlayers.nameKey, nameKey)).limit(1);
   if (!created[0]) throw new Error("Could not load the newly created player");
@@ -260,9 +271,10 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
     returning: false,
     burnedFingerUnlocked: created[0].burnedFingerUnlocked,
     antiClickAchievementUnlocked: created[0].antiClickAchievementUnlocked,
-      robotEaterUnlocked: created[0].robotEaterUnlocked,
-      robotChallengeActive: created[0].robotChallengeActive,
-      robotConfessionCount: created[0].robotConfessionCount,
+    robotEaterUnlocked: created[0].robotEaterUnlocked,
+    robotChallengeActive: created[0].robotChallengeActive,
+    robotConfessionCount: created[0].robotConfessionCount,
+    honeypotKey: created[0].honeypotKey,
   };
 }
 
@@ -283,7 +295,11 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
     name: noodlePlayers.displayName,
     score: scoreColumn,
     robotIconExpiresAt: noodlePlayers.robotIconExpiresAt,
-  }).from(noodlePlayers).where(and(eq(noodlePlayers.shadowBanned, false), board === "total" ? undefined : gt(scoreColumn, 0)))
+  }).from(noodlePlayers).where(and(
+    eq(noodlePlayers.shadowBanned, false),
+    eq(noodlePlayers.leaderboardHidden, false),
+    board === "total" ? undefined : gt(scoreColumn, 0),
+  ))
     .orderBy(desc(scoreColumn), asc(noodlePlayers.id))
     .limit(10);
   const now = Date.now();
@@ -302,6 +318,7 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
     antiClickAchievementUnlocked: boolean;
     robotEaterUnlocked: boolean;
     robotIconActive: boolean;
+    honeypotKey: string;
   } | null = null;
   if (token) {
     const tokenHash = hashToken(token);
@@ -324,6 +341,8 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
       shadowChickenClicks: noodlePlayers.shadowChickenClicks,
       shadowOctopusClicks: noodlePlayers.shadowOctopusClicks,
       shadowExperience: noodlePlayers.shadowExperience,
+      honeypotKey: noodlePlayers.honeypotKey,
+      leaderboardHidden: noodlePlayers.leaderboardHidden,
     }).from(noodlePlayers).where(eq(noodlePlayers.loginTokenHash, tokenHash)).limit(1);
     const player = playerRows[0];
     if (player) {
@@ -341,13 +360,14 @@ export async function getNoodleLeaderboard(token?: string, board: NoodleBoard = 
         antiClickAchievementUnlocked: player.shadowBanned ? false : player.antiClickAchievementUnlocked,
         robotEaterUnlocked: player.robotEaterUnlocked,
         robotIconActive: Number(player.robotIconExpiresAt ?? 0) > now,
+        honeypotKey: player.honeypotKey,
       };
       if (board === "total" || snapshotScore(visible, board) > 0) {
         const visibleScore = snapshotScore(visible, board);
         const ahead = await db.select({ value: count() }).from(noodlePlayers)
-          .where(and(eq(noodlePlayers.shadowBanned, false), gt(scoreColumn, visibleScore)));
+          .where(and(eq(noodlePlayers.shadowBanned, false), eq(noodlePlayers.leaderboardHidden, false), gt(scoreColumn, visibleScore)));
         const sameScoreAhead = await db.select({ value: count() }).from(noodlePlayers)
-          .where(and(eq(noodlePlayers.shadowBanned, false), eq(scoreColumn, visibleScore), lt(noodlePlayers.id, player.playerId)));
+          .where(and(eq(noodlePlayers.shadowBanned, false), eq(noodlePlayers.leaderboardHidden, false), eq(scoreColumn, visibleScore), lt(noodlePlayers.id, player.playerId)));
         me = {
           playerId: player.playerId,
           name: player.name,
@@ -407,6 +427,7 @@ export async function recordNoodleClick(
       const nextShadow = incrementClickSnapshot(startingSnapshot, mood, player.shadowBanReason === "honeypot" ? 2 : 1);
       await tx.update(noodlePlayers).set({
         shadowBanned: true,
+        leaderboardHidden: true,
         shadowBanReason: newlyShadowBanned ? suspiciousReason : player.shadowBanReason,
         shadowBannedAt: newlyShadowBanned ? new Date(receivedAt) : player.shadowBannedAt,
         shadowTotalClicks: nextShadow.totalClicks,
@@ -535,16 +556,20 @@ export async function resetRobotConfession(token: string): Promise<boolean> {
   });
 }
 
-/** Silently mark the session as shadowbanned; subsequent clicks only advance private decoy counters. */
-export async function activateHiddenNoodleBoost(token: string): Promise<void> {
+/** Silently mark the token/key pair as shadowbanned; later clicks only advance private decoy counters. */
+export async function activateHiddenNoodleBoost(token: string, honeypotKey: string): Promise<void> {
   const db = await requireNoodleDb();
   await db.transaction(async (tx) => {
     const rows = await tx.select().from(noodlePlayers)
-      .where(eq(noodlePlayers.loginTokenHash, hashToken(token))).limit(1).for("update");
+      .where(and(
+        eq(noodlePlayers.loginTokenHash, hashToken(token)),
+        eq(noodlePlayers.honeypotKey, honeypotKey),
+      )).limit(1).for("update");
     const player = rows[0];
     if (!player) return;
     await tx.update(noodlePlayers).set({
       shadowBanned: true,
+      leaderboardHidden: true,
       shadowBanReason: "honeypot",
       shadowBannedAt: player.shadowBanned ? player.shadowBannedAt : new Date(),
       shadowTotalClicks: player.shadowBanned ? player.shadowTotalClicks : player.totalClicks,
@@ -567,7 +592,10 @@ export async function getShadowBannedPlayers() {
     bannedAt: noodlePlayers.shadowBannedAt,
     publicTotalClicks: noodlePlayers.totalClicks,
     decoyTotalClicks: noodlePlayers.shadowTotalClicks,
-  }).from(noodlePlayers).where(eq(noodlePlayers.shadowBanned, true))
+  }).from(noodlePlayers).where(or(
+    eq(noodlePlayers.shadowBanned, true),
+    eq(noodlePlayers.leaderboardHidden, true),
+  ))
     .orderBy(desc(noodlePlayers.shadowBannedAt), desc(noodlePlayers.id));
 }
 
@@ -575,11 +603,15 @@ export async function liftNoodleShadowban(playerId: number): Promise<boolean> {
   const db = await requireNoodleDb();
   const result = await db.update(noodlePlayers).set({
     shadowBanned: false,
+    leaderboardHidden: false,
     shadowBanReason: null,
     shadowBannedAt: null,
     clickTimestamps: "[]",
     robotChallengeActive: false,
     robotConfessionCount: 0,
-  }).where(and(eq(noodlePlayers.id, playerId), eq(noodlePlayers.shadowBanned, true)));
+  }).where(and(
+    eq(noodlePlayers.id, playerId),
+    or(eq(noodlePlayers.shadowBanned, true), eq(noodlePlayers.leaderboardHidden, true)),
+  ));
   return Number(result[0].affectedRows ?? 0) > 0;
 }

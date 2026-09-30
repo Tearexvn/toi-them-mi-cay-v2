@@ -289,6 +289,7 @@ button { font: inherit; }
 .mood-note { margin: 11px 0 0; color: #b09a88; font-size: 9px; font-weight: 700; letter-spacing: .17em; }
 .bottom-note { width: min(1320px, calc(100% - 64px)); margin: auto auto 0; padding: 20px 0 25px; display: flex; justify-content: center; align-items: center; gap: 12px; color: #ad9582; font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
 .footer-asterisk { color: var(--accent); font-size: 12px; transition: color 220ms ease; }
+.footer-version { color: var(--accent-deep); letter-spacing: .08em; text-transform: none; }
 
 @media (max-width: 700px) {
   .topbar { width: calc(100% - 36px); padding: 22px 0; }
