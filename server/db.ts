@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, asc, count, desc, eq, gt, lt, or, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import { CLICK_HISTORY_LIMIT, detectSuspiciousClickPattern, type AntiAutoClickReason } from "../shared/anti-auto-click";
 import { advanceRobotConfession, ROBOT_CONFESSION_TAPS_REQUIRED } from "../shared/noodle-achievements";
 import { getVisibleClickSnapshot, includePrivateLeaderboardEntry, incrementClickSnapshot, type NoodleClickSnapshot } from "../shared/noodle-shadowban";
@@ -13,7 +14,15 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      const client = postgres(process.env.DATABASE_URL, {
+        // Supabase's transaction pooler does not support prepared statements.
+        prepare: false,
+        // Vercel instances should not each open a large pool against Postgres.
+        max: process.env.VERCEL ? 1 : 5,
+        idle_timeout: 20,
+        connect_timeout: 10,
+      });
+      _db = drizzle(client, { schema: { users, noodlePlayers } });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -58,7 +67,10 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
     if (!values.lastSignedIn) values.lastSignedIn = new Date();
     if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
-    await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+    await db.insert(users).values(values).onConflictDoUpdate({
+      target: users.openId,
+      set: updateSet,
+    });
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
@@ -235,7 +247,7 @@ export async function joinNoodlePlayer(name: string, existingToken?: string) {
   } catch (error) {
     // If two friends choose the same name at once, the second joins that same row
     // instead of receiving the old duplicate-name error.
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ER_DUP_ENTRY") {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {
       const racedPlayer = await db.select({
         id: noodlePlayers.id,
         displayName: noodlePlayers.displayName,
@@ -609,9 +621,11 @@ export async function liftNoodleShadowban(playerId: number): Promise<boolean> {
     clickTimestamps: "[]",
     robotChallengeActive: false,
     robotConfessionCount: 0,
-  }).where(and(
-    eq(noodlePlayers.id, playerId),
-    or(eq(noodlePlayers.shadowBanned, true), eq(noodlePlayers.leaderboardHidden, true)),
-  ));
-  return Number(result[0].affectedRows ?? 0) > 0;
+  }).where(
+    and(
+      eq(noodlePlayers.id, playerId),
+      or(eq(noodlePlayers.shadowBanned, true), eq(noodlePlayers.leaderboardHidden, true)),
+    ),
+  ).returning({ id: noodlePlayers.id });
+  return result.length > 0;
 }
