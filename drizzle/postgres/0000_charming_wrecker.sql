@@ -1,0 +1,46 @@
+CREATE TYPE "public"."user_role" AS ENUM('user', 'admin');--> statement-breakpoint
+CREATE TABLE "noodle_players" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"displayName" varchar(48) NOT NULL,
+	"nameKey" varchar(96) NOT NULL,
+	"loginTokenHash" varchar(64) NOT NULL,
+	"totalClicks" bigint DEFAULT 0 NOT NULL,
+	"experience" text NOT NULL,
+	"beefClicks" bigint DEFAULT 0 NOT NULL,
+	"chickenClicks" bigint DEFAULT 0 NOT NULL,
+	"octopusClicks" bigint DEFAULT 0 NOT NULL,
+	"burnedFingerUnlocked" boolean DEFAULT false NOT NULL,
+	"clickTimestamps" varchar(768) DEFAULT '[]' NOT NULL,
+	"leaderboardHidden" boolean DEFAULT false NOT NULL,
+	"honeypotKey" varchar(64) DEFAULT '' NOT NULL,
+	"antiClickAchievementUnlocked" boolean DEFAULT false NOT NULL,
+	"robotChallengeActive" boolean DEFAULT false NOT NULL,
+	"robotConfessionCount" integer DEFAULT 0 NOT NULL,
+	"robotEaterUnlocked" boolean DEFAULT false NOT NULL,
+	"robotIconExpiresAt" bigint,
+	"shadowBanned" boolean DEFAULT false NOT NULL,
+	"shadowBanReason" varchar(32),
+	"shadowBannedAt" timestamp with time zone,
+	"shadowTotalClicks" bigint DEFAULT 0 NOT NULL,
+	"shadowBeefClicks" bigint DEFAULT 0 NOT NULL,
+	"shadowChickenClicks" bigint DEFAULT 0 NOT NULL,
+	"shadowOctopusClicks" bigint DEFAULT 0 NOT NULL,
+	"shadowExperience" text,
+	"createdAt" timestamp with time zone DEFAULT now() NOT NULL,
+	"updatedAt" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "noodle_players_nameKey_unique" UNIQUE("nameKey"),
+	CONSTRAINT "noodle_players_loginTokenHash_unique" UNIQUE("loginTokenHash")
+);
+--> statement-breakpoint
+CREATE TABLE "users" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"openId" varchar(64) NOT NULL,
+	"name" text,
+	"email" varchar(320),
+	"loginMethod" varchar(64),
+	"role" "user_role" DEFAULT 'user' NOT NULL,
+	"createdAt" timestamp with time zone DEFAULT now() NOT NULL,
+	"updatedAt" timestamp with time zone DEFAULT now() NOT NULL,
+	"lastSignedIn" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "users_openId_unique" UNIQUE("openId")
+);

@@ -150,8 +150,27 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+const optionalAnalyticsPlugin: Plugin = {
+  name: "optional-analytics",
+  transformIndexHtml(html) {
+    const endpoint = process.env.VITE_ANALYTICS_ENDPOINT?.replace(/\/+$/, "");
+    const websiteId = process.env.VITE_ANALYTICS_WEBSITE_ID;
+    if (!endpoint || !websiteId) return html;
+    const safeEndpoint = endpoint.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+    const safeWebsiteId = websiteId.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+    const script = `<script defer src="${safeEndpoint}/umami" data-website-id="${safeWebsiteId}"></script>`;
+    return html.replace("</body>", `  ${script}\n  </body>`);
+  },
+};
 
+const isVercelBuild = process.env.VITE_BUILD_TARGET === "vercel";
+const plugins = [
+  react(),
+  tailwindcss(),
+  optionalAnalyticsPlugin,
+  jsxLocPlugin(),
+  ...(isVercelBuild ? [] : [vitePluginManusRuntime(), vitePluginManusDebugCollector()]),
+];
 export default defineConfig({
   plugins,
   resolve: {
@@ -165,7 +184,7 @@ export default defineConfig({
   root: path.resolve(import.meta.dirname, "client"),
   publicDir: path.resolve(import.meta.dirname, "client", "public"),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    outDir: path.resolve(import.meta.dirname, isVercelBuild ? "public" : "dist/public"),
     emptyOutDir: true,
   },
   server: {

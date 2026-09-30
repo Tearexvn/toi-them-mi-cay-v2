@@ -66,6 +66,7 @@ const boards: { id: Board; label: string; emoji: string }[] = [
 const TOKEN_KEY = "mi-cay-player-token";
 const NAME_KEY = "mi-cay-player-name";
 const fireEmojis = ["🔥", "🔥", "✨", "🔥", "🧨"];
+const isManusOAuthConfigured = Boolean(import.meta.env.VITE_OAUTH_PORTAL_URL && import.meta.env.VITE_APP_ID);
 
 function createFireDrops() {
   const createdAt = Date.now();
@@ -817,7 +818,7 @@ export default function Home() {
         </div>
       </section>
 
-      {ownerCheck.data === false && (
+      {ownerCheck.data === false && isManusOAuthConfigured && (
         <div className="owner-access-link">
           <button type="button" onClick={() => startLogin()}>Đăng nhập quản lý</button>
         </div>
@@ -861,7 +862,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer className="bottom-note"><span>MI CAY CLUB</span><span className="footer-asterisk">✳</span><span>hết thèm thì thôi</span></footer>
+      <footer className="bottom-note"><span>MI CAY CLUB</span><span className="footer-asterisk">✳</span><span>hết thèm thì thôi</span><span className="footer-version">A0.1</span></footer>
     </main>
   );
 }
